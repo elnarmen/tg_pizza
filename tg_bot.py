@@ -10,7 +10,7 @@ from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageH
 
 from moltin_api import get_access_token, add_product_to_cart, remove_product_from_cart
 from moltin_api import get_all_products, get_cart_total, get_cart_products, get_product_by_id, get_img_url
-from moltin_api import get_all_pizzerias
+from moltin_api import get_all_pizzerias, create_customer_entry, get_customer_entry, get_deliveryman_id
 from yandex_api import fetch_coordinates
 
 
@@ -115,30 +115,47 @@ def handle_description(update, context):
     return 'HANDLE_DESCRIPTION'
 
 
-def send_cart_contents(update, context, client_id, client_secret, cart_id):
+def get_cart_contents(client_id, client_secret, cart_id):
     cart_products = get_cart_products(client_id, client_secret, cart_id)
-    message_text = ''
-    keyboard = []
+    cart_display = []
     for product in cart_products['data']:
         total_price = \
             product['meta']['display_price']['with_tax']['value']['formatted']
-        message_text += dedent(
+        cart_display.append(dedent(
             f'''\
                 {product['name']}
                 {product['description'].strip()}
-                {product['quantity']} пицц в корзине на сумму {total_price}\n
+                {product['quantity']} пицц в корзине на сумму {total_price}
             '''
-        )
-        keyboard.append(
-            [InlineKeyboardButton(
-                f"Убрать из корзины {product['name']}",
-                callback_data=product['id']
-            )]
-        )
+        ))
+    keyboard = [
+        [InlineKeyboardButton(f"Убрать из корзины '{product['name']}'", callback_data=product["id"])]
+        for product in cart_products['data']
+    ]
     keyboard.append([InlineKeyboardButton('В меню', callback_data='/start')])
-    keyboard.append([InlineKeyboardButton('Оплатить', callback_data='payment')])
-    message_text += f'К оплате: {get_cart_total(client_id, client_secret, cart_id)}'
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    if cart_products:
+        keyboard.append([InlineKeyboardButton('Оплатить', callback_data='payment')])
+        cart_display.append(f'К оплате: {get_cart_total(client_id, client_secret, cart_id)}')
+    message_text = '\n\n'.join(cart_display) if cart_products else 'Корзина пуста'
+    markup = InlineKeyboardMarkup(keyboard)
+
+    return message_text, markup
+
+
+def send_order_to_deliveryman(update, context, client_id, client_secret, cart_id, deliveryman_id):
+    message_text, _ = get_cart_contents(client_id, client_secret, cart_id)
+    context.bot.send_message(
+        chat_id=deliveryman_id,
+        text=message_text,
+    )
+    context.bot.delete_message(
+        chat_id=cart_id,
+        message_id=update.callback_query.message.message_id
+    )
+
+
+def send_cart_contents(update, context, client_id, client_secret, cart_id):
+    message_text, reply_markup = get_cart_contents(client_id, client_secret, cart_id)
     context.bot.send_message(
         chat_id=cart_id,
         text=message_text,
@@ -158,15 +175,15 @@ def handle_cart(update, context):
     if query['data'] == 'cart':
         send_cart_contents(update, context, client_id, client_secret, cart_id)
     elif query['data'] == 'payment':
-        handle_waiting(update, context)
-        return 'HANDLE_WAITING'
+        handle_location_waiting(update, context)
+        return 'LOCATION_WAITING'
     else:
         remove_product_from_cart(client_id, client_secret, cart_id, query['data'])
         send_cart_contents(update, context, client_id, client_secret, cart_id)
     return 'HANDLE_CART'
 
 
-def handle_waiting(update, context):
+def handle_location_waiting(update, context):
     query = update.callback_query
 
     message_keyboard = [[
@@ -175,7 +192,9 @@ def handle_waiting(update, context):
     markup = ReplyKeyboardMarkup(message_keyboard,
                                  one_time_keyboard=True,
                                  resize_keyboard=True)
-
+    if update.message and update.message.location:
+        handle_location(update, context)
+        return send_delivery_terms(update, context)
     if update.message:
         yandex_api_key = context.bot_data['yandex_api_key']
         coords = fetch_coordinates(yandex_api_key, update.message.text)
@@ -184,8 +203,13 @@ def handle_waiting(update, context):
                 text='Не могу распознать адрес. Пожалуйста, проверьте правильность ввода',
                 reply_markup=markup
             )
-            return 'HANDLE_WAITING'
+            return 'LOCATION_WAITING'
+        lat, lon = coords
+        client_id = context.bot_data['client_id']
+        client_secret = context.bot_data['client_secret']
+        chat_id = update.effective_chat.id
         context.bot_data['customer_coords'] = coords
+        create_customer_entry(client_id, client_secret, chat_id, lat, lon)
         return send_delivery_terms(update, context)
     else:
         query.message.reply_text(
@@ -196,13 +220,17 @@ def handle_waiting(update, context):
             chat_id=update.effective_chat.id,
             message_id=update.callback_query.message.message_id
         )
-        return 'HANDLE_WAITING'
+        return 'LOCATION_WAITING'
 
 
 def handle_location(update, context):
-    coords = update.message.location['latitude'], update.message.location['longitude']
-    context.bot_data['customer_coords'] = coords
-    return send_delivery_terms(update, context)
+    lat, lon = update.message.location['latitude'], update.message.location['longitude']
+    client_id = context.bot_data['client_id']
+    client_secret = context.bot_data['client_secret']
+    chat_id = update.effective_chat.id
+
+    context.bot_data['customer_coords'] = lat, lon
+    create_customer_entry(client_id, client_secret, chat_id, lat, lon)
 
 
 def get_distances(distances_to_customer):
@@ -213,8 +241,8 @@ def min_distance_calculation(update, context):
     client_id = context.bot_data['client_id']
     client_secret = context.bot_data['client_secret']
     customer_coords = context.bot_data['customer_coords']
+    all_pizzerias_data = get_all_pizzerias(client_id, client_secret)
 
-    all_pizzerias_data = get_all_pizzerias(client_id, client_secret)['data']
     pizzerias_with_distance_to_customer = []
     for pizzeria in all_pizzerias_data:
         pizzeria_coords = pizzeria['lat'], pizzeria['lon']
@@ -230,7 +258,12 @@ def min_distance_calculation(update, context):
 def send_delivery_terms(update, context):
     nearest_pizzeria = min_distance_calculation(update, context)
     distance_to_customer = nearest_pizzeria['distance']
-    print(distance_to_customer)
+
+    keyboard = [
+        [InlineKeyboardButton('Доставка', callback_data='shipping')],
+        [InlineKeyboardButton('Самовывоз', callback_data='pickup')]
+    ]
+
     if distance_to_customer <= .5:
         text = dedent(
             f''' 
@@ -267,7 +300,42 @@ def send_delivery_terms(update, context):
                 Ближайшая пиццерия аж в {rounded_distance} километрах от вас!
             '''
         )
-    context.bot.send_message(text=text, chat_id=update.message.chat_id)
+        del keyboard[0]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    context.bot.send_message(text=text, chat_id=update.message.chat_id, reply_markup=reply_markup)
+    context.bot_data['nearest_pizzeria'] = nearest_pizzeria
+    return 'HANDLE_SHIPPING_METHOD'
+
+
+def handle_shipping_method(update, context):
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    client_id = context.bot_data['client_id']
+    client_secret = context.bot_data['client_secret']
+    if query['data'] == 'pickup':
+        query.message.reply_text(
+            text=dedent(
+                f'''
+                    Адрес для самовывоза:
+                    {context.bot_data['nearest_pizzeria']['address']}
+                '''
+            )
+        )
+        return
+    deliveryman_id = get_deliveryman_id(
+        client_id,
+        client_secret,
+        context.bot_data['nearest_pizzeria']['address']
+    )
+    query.message.reply_text(
+        text='Ваш заказ принят. Ожидайте доставки'
+    )
+
+    send_order_to_deliveryman(update, context,
+                              client_id, client_secret,
+                              chat_id, deliveryman_id)
+    return 'SHIPPING'
 
 
 def handle_users_reply(update, context):
@@ -298,19 +366,20 @@ def handle_users_reply(update, context):
         user_state = 'HANDLE_CART'
     else:
         user_state = db_connection.get(chat_id)
-
     states_functions = {
         'START': start,
         'HANDLE_MENU': handle_menu,
         'HANDLE_DESCRIPTION': handle_description,
         'HANDLE_CART': handle_cart,
-        'HANDLE_WAITING': handle_waiting,
-        'DELIVERY_TERMS': send_delivery_terms
+        'LOCATION_WAITING': handle_location_waiting,
+        'DELIVERY_TERMS': send_delivery_terms,
+        'HANDLE_SHIPPING_METHOD': handle_shipping_method,
     }
 
     state_handler = states_functions[user_state]
     next_state = state_handler(update, context)
-    db_connection[chat_id] = next_state
+    if next_state:
+        db_connection[chat_id] = next_state
 
 
 def main():
@@ -339,7 +408,7 @@ def main():
 
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply))
-    dispatcher.add_handler(MessageHandler(Filters.location, handle_location))
+    dispatcher.add_handler(MessageHandler(Filters.location, handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
 
     updater.start_polling()

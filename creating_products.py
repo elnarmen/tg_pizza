@@ -3,9 +3,9 @@ import os
 
 import requests
 from dotenv import load_dotenv
-from moltin_api import create_product, create_flow, create_flow_field, create_flow_entry, create_inventory
+from moltin_api import create_product, create_flow, create_flow_field, create_pizzeria_entry, create_inventory
 from moltin_api import download_img, create_img_relationship, add_product_price, create_node_relationship
-from moltin_api import get_all_pizzerias
+from moltin_api import get_all_pizzerias, change
 
 
 addresses_url = 'https://dvmn.org/media/filer_public/90/90/9090ecbf-249f-42c7-8635-a96985268b88/addresses.json'
@@ -24,8 +24,23 @@ def main():
     client_id = os.getenv('CLIENT_ID')
     client_secret = os.getenv('CLIENT_SECRET')
 
-    menu_data = get_json_data(menu_url)
-    print(get_all_pizzerias(client_id, client_secret))
+    # create_flow_field(client_id, client_secret, 'chat_id', 'integer', '7b5738ca-f926-42ee-9243-85e700fb1f29')
+    # create_flow_field(client_id, client_secret, 'address', 'string', '7b5738ca-f926-42ee-9243-85e700fb1f29')
+    # create_flow_field(client_id, client_secret, 'alias', 'string', '7b5738ca-f926-42ee-9243-85e700fb1f29')
+    # create_flow_field(client_id, client_secret, 'lat', 'string', '7b5738ca-f926-42ee-9243-85e700fb1f29')
+    # create_flow_field(client_id, client_secret, 'lon', 'string', '7b5738ca-f926-42ee-9243-85e700fb1f29')
+    pizzerias_data = get_json_data(addresses_url)
+
+    # for pizzeria in pizzerias_data:
+    #     address = pizzeria['address']['full']
+    #     alias = pizzeria['alias']
+    #     chat_id = 363285509
+    #     lat = pizzeria['coordinates']['lat']
+    #     lon = pizzeria['coordinates']['lon']
+    #     create_pizzeria_entry(client_id, client_secret, chat_id, address, alias, lat, lon)
+    for entry in get_all_pizzerias(client_id, client_secret)['data']:
+        id = entry['id']
+        print(change(client_id, client_secret, id))
 
 
 if __name__ == '__main__':

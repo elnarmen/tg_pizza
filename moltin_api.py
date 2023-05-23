@@ -60,6 +60,7 @@ def create_flow(client_id, client_secret, flow_name):
     url = 'https://api.moltin.com/v2/flows'
     response = requests.post(url, headers=headers, json=json_data)
     response.raise_for_status()
+    return response.json()['data']['id']
 
 
 def create_flow_field(client_id,
@@ -101,17 +102,18 @@ def create_flow_field(client_id,
     return response.json()
 
 
-def create_flow_entry(client_id, client_secret, flow_slug, address, alias, lat, lon):
+def create_pizzeria_entry(client_id, client_secret, deliveryman_chat_id, address, alias, lat, lon):
     access_token = get_access_token(client_id, client_secret)
     headers = {
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json',
     }
-    url = f'https://api.moltin.com/v2/flows/{flow_slug}/entries'
+    url = f'https://api.moltin.com/v2/flows/pizzeria/entries'
 
     data = {
             'data': {
                 'type': 'entry',
+                'chat_id': deliveryman_chat_id,
                 'address': f'{address}',
                 'alias': f'{alias}',
                 'lat': f'{lat}',
@@ -122,33 +124,35 @@ def create_flow_entry(client_id, client_secret, flow_slug, address, alias, lat, 
     response.raise_for_status()
 
 
-def create_product(client_id, client_secret, name, sku, description):
+def create_customer_entry(client_id, client_secret, chat_id, lat, lon):
     access_token = get_access_token(client_id, client_secret)
-
     headers = {
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json',
     }
+    url = 'https://api.moltin.com/v2/flows/customer_address/entries'
 
-    url = 'https://api.moltin.com/pcm/products'
+    data = {
+            'data': {
+                'type': 'entry',
+                'chat_id': chat_id,
+                'lat': lat,
+                'lon': lon
+            }
+        }
+    response = requests.post(url, headers=headers, json=data)
 
-    json_data = {
-        'data': {
-            'type': 'product',
-            'attributes': {
-                'name': f'{name}',
-                'sku': f'{sku}',
-                'slug': f'{sku}',
-                'description': f'{description}',
-                'status': 'live',
-                'commodity_type': 'physical',
-            },
-        },
+
+def get_customer_entry(client_id, client_secret, chat_id):
+    access_token = get_access_token(client_id, client_secret)
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json',
     }
-
-    response = requests.post(url, headers=headers, json=json_data)
+    url = 'https://api.moltin.com/v2/flows/customer_address/entries'
+    response = requests.get(url, headers=headers)
     response.raise_for_status()
-    return response.json()['data']['id']
+    return response.json()['data']
 
 
 def download_img(client_id, client_secret, img_url):
@@ -367,26 +371,11 @@ def get_all_pizzerias(client_id, client_secret, flow_slug='pizzeria'):
     url = f'https://api.moltin.com/v2/flows/{flow_slug}/entries'
     response = requests.get(url, headers=headers)
     response.raise_for_status()
-    return response.json()
+    return response.json()['data']
 
 
-# def create_customer(client_id, client_secret, user_name, user_email):
-#     access_token = get_access_token(client_id, client_secret)
-#     headers = {
-#         'Authorization': f'Bearer {access_token}',
-#         'Content-Type': 'application/json',
-#     }
-#
-#     data = {
-#         'data': {
-#             'type': 'customer',
-#             'name': user_name,
-#             'email': user_email,
-#         },
-#     }
-#     response = requests.post(
-#         'https://api.moltin.com/v2/customers',
-#         headers=headers,
-#         json=data
-#     )
-#     response.raise_for_status()
+def get_deliveryman_id(client_id, client_secret, address):
+    pizzerias = get_all_pizzerias(client_id, client_secret)
+    for pizzeria in pizzerias:
+        if address == pizzeria['address']:
+            return pizzeria['chat_id']
