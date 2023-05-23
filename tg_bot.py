@@ -6,7 +6,12 @@ import redis
 from dotenv import load_dotenv
 from geopy import distance
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, JobQueue
+from telegram import LabeledPrice
+from telegram.ext import (
+    Updater, CommandHandler,
+    CallbackQueryHandler, MessageHandler,
+    Filters, JobQueue, PreCheckoutQueryHandler
+)
 
 from moltin_api import get_access_token, add_product_to_cart, remove_product_from_cart
 from moltin_api import get_all_products, get_cart_total, get_cart_products, get_product_by_id, get_img_url
@@ -120,12 +125,12 @@ def get_cart_contents(client_id, client_secret, cart_id):
     cart_display = []
     for product in cart_products['data']:
         total_price = \
-            product['meta']['display_price']['with_tax']['value']['formatted']
+            product['meta']['display_price']['with_tax']['value']['formatted'][1:]
         cart_display.append(dedent(
             f'''\
                 {product['name']}
                 {product['description'].strip()}
-                {product['quantity']} пицц в корзине на сумму {total_price}
+                {product['quantity']} пицц в корзине на сумму {total_price} ₽
             '''
         ))
     keyboard = [
@@ -134,8 +139,8 @@ def get_cart_contents(client_id, client_secret, cart_id):
     ]
     keyboard.append([InlineKeyboardButton('В меню', callback_data='/start')])
     if cart_products:
-        keyboard.append([InlineKeyboardButton('Оплатить', callback_data='payment')])
-        cart_display.append(f'К оплате: {get_cart_total(client_id, client_secret, cart_id)}')
+        keyboard.append([InlineKeyboardButton('Заказать', callback_data='payment')])
+        cart_display.append(f'К оплате: {get_cart_total(client_id, client_secret, cart_id)[1:]} ₽')
     message_text = '\n\n'.join(cart_display) if cart_products else 'Корзина пуста'
     markup = InlineKeyboardMarkup(keyboard)
 
@@ -323,15 +328,15 @@ def handle_shipping_method(update, context):
             )
         )
         return
+    query.message.reply_text(
+        text='После оплаты заказ будет передан курьеру'
+    )
+
     deliveryman_id = get_deliveryman_id(
         client_id,
         client_secret,
         context.bot_data['nearest_pizzeria']['address']
     )
-    query.message.reply_text(
-        text='Ваш заказ принят. Ожидайте доставки'
-    )
-
     send_order_to_deliveryman(update, context,
                               client_id, client_secret,
                               chat_id, deliveryman_id)
@@ -341,6 +346,7 @@ def handle_shipping_method(update, context):
         3600,
         context=chat_id
     )
+    return start_without_shipping_callback(update, context, chat_id)
 
 def write_to_customer(context):
     text=dedent(
@@ -353,6 +359,42 @@ def write_to_customer(context):
         context.job.context,
         text=text,
     )
+
+
+def start_without_shipping_callback(update, context, chat_id):
+    client_id = context.bot_data['client_id']
+    client_secret = context.bot_data['client_secret']
+    payment_token = context.bot_data['payment_token']
+
+    title = 'Заказ'
+    description = 'Описание платежа'
+    payload = 'Custom-Payload'
+    provider_token = payment_token
+    currency = 'RUB'
+    price = float(get_cart_total(client_id, client_secret, cart_id=chat_id)[1:]) * 100
+    prices = [LabeledPrice('Test', int(price))]
+
+    context.bot.send_invoice(
+        chat_id,
+        title,
+        description,
+        payload,
+        provider_token,
+        currency,
+        prices,
+    )
+
+
+def precheckout_callback(update, context):
+    query = update.pre_checkout_query
+    if query.invoice_payload != 'Custom-Payload':
+        query.answer(ok=False, error_message="Something went wrong...")
+    else:
+        query.answer(ok=True)
+        context.bot.send_message(
+            text='Заказ передан курьеру, ожидайте',
+            chat_id=query.from_user.id
+        )
 
 
 def handle_users_reply(update, context):
@@ -407,6 +449,7 @@ def main():
     client_id = os.getenv('CLIENT_ID')
     client_secret = os.getenv('CLIENT_SECRET')
     yandex_api_key = os.getenv('YANDEX_GEOCODER_API_KEY')
+    payment_token = os.getenv('PAYMENT_TOKEN')
     redis_host = os.getenv('REDIS_HOST')
     redis_port = os.getenv('REDIS_PORT')
     redis_password = os.getenv('REDIS_PASSWORD')
@@ -422,11 +465,13 @@ def main():
     dispatcher.bot_data['client_id'] = client_id
     dispatcher.bot_data['client_secret'] = client_secret
     dispatcher.bot_data['yandex_api_key'] = yandex_api_key
+    dispatcher.bot_data['payment_token'] = payment_token
 
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply, pass_job_queue=True))
     dispatcher.add_handler(MessageHandler(Filters.location, handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
+    dispatcher.add_handler(PreCheckoutQueryHandler(precheckout_callback))
 
     updater.start_polling()
 
