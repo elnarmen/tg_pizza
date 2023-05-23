@@ -6,7 +6,7 @@ import redis
 from dotenv import load_dotenv
 from geopy import distance
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, JobQueue
 
 from moltin_api import get_access_token, add_product_to_cart, remove_product_from_cart
 from moltin_api import get_all_products, get_cart_total, get_cart_products, get_product_by_id, get_img_url
@@ -335,7 +335,24 @@ def handle_shipping_method(update, context):
     send_order_to_deliveryman(update, context,
                               client_id, client_secret,
                               chat_id, deliveryman_id)
-    return 'SHIPPING'
+
+    context.job_queue.run_once(
+        write_to_customer,
+        3600,
+        context=chat_id
+    )
+
+def write_to_customer(context):
+    text=dedent(
+            f'''
+                Приятного аппетита! *место для рекламы*
+                *сообщение что делать если пицца не пришла*
+            '''
+        )
+    context.bot.send_message(
+        context.job.context,
+        text=text,
+    )
 
 
 def handle_users_reply(update, context):
@@ -407,7 +424,7 @@ def main():
     dispatcher.bot_data['yandex_api_key'] = yandex_api_key
 
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
-    dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply))
+    dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply, pass_job_queue=True))
     dispatcher.add_handler(MessageHandler(Filters.location, handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
 
