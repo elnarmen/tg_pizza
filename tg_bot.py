@@ -87,8 +87,9 @@ def handle_menu(update, context):
 
     product_price = \
         selected_product['meta']['display_price']['without_tax']['formatted']
-
-    product_image_url = get_img_url(client_id, client_secret, product_id)
+    img_id = \
+        selected_product['relationships']['main_image']['data']['id']
+    product_image_url = get_img_url(client_id, client_secret, img_id)
     chat_id = update.effective_chat.id
 
     text = dedent(

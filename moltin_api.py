@@ -126,13 +126,12 @@ def get_product_by_id(client_id, client_secret, product_id):
     return response.json()
 
 
-def get_img_url(client_id, client_secret, prod_id):
+def get_img_url(client_id, client_secret, img_id):
     access_token = get_access_token(client_id, client_secret)
 
     headers = {
         'Authorization': f'Bearer {access_token}',
     }
-    img_id = get_img_id(client_id, client_secret, prod_id)
     url = f'https://api.moltin.com/v2/files/{img_id}'
 
     response = requests.get(url, headers=headers)
