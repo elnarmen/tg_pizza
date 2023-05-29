@@ -14,8 +14,9 @@ from telegram import LabeledPrice
 from telegram.ext import (
     Updater, CommandHandler,
     CallbackQueryHandler, MessageHandler,
-    Filters, PreCheckoutQueryHandler
+    Filters, PreCheckoutQueryHandler, JobQueue
 )
+
 
 from moltin_api import (
     add_product_to_cart, remove_product_from_cart,
@@ -393,7 +394,7 @@ def handle_shipping_method(update, context):
 
     context.job_queue.run_once(
         write_to_customer,
-        3600,
+        15,
         context=chat_id
     )
     return start_without_shipping_callback(update, context, chat_id)
