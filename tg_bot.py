@@ -1,21 +1,28 @@
-import logging
 import os
 from textwrap import dedent
 
 import redis
 from dotenv import load_dotenv
 from geopy import distance
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    KeyboardButton
+)
 from telegram import LabeledPrice
 from telegram.ext import (
     Updater, CommandHandler,
     CallbackQueryHandler, MessageHandler,
-    Filters, JobQueue, PreCheckoutQueryHandler
+    Filters, PreCheckoutQueryHandler
 )
 
-from moltin_api import get_access_token, add_product_to_cart, remove_product_from_cart
-from moltin_api import get_all_products, get_cart_total, get_cart_products, get_product_by_id, get_img_url
-from moltin_api import get_all_pizzerias, create_customer_entry, get_customer_entry, get_deliveryman_id
+from moltin_api import (
+    add_product_to_cart, remove_product_from_cart,
+    get_all_products, get_cart_total, get_cart_products,
+    get_product_by_id, get_img_url, get_all_pizzerias,
+    create_customer_entry, get_deliveryman_id
+)
 from yandex_api import fetch_coordinates
 
 
@@ -37,7 +44,9 @@ def get_products_keyboard(update, congext):
 def start(update, context):
     reply_markup = get_products_keyboard(update, context)
     if update.message:
-        update.message.reply_text('Выберите продукт:', reply_markup=reply_markup)
+        update.message.reply_text(
+            'Выберите продукт:', reply_markup=reply_markup
+        )
     else:
         query = update.callback_query
         query.message.reply_text(
@@ -55,7 +64,10 @@ def start(update, context):
 def handle_menu(update, context):
     keyboard = [
         [
-            InlineKeyboardButton('Положить в корзину', callback_data='add_to_cart'),
+            InlineKeyboardButton(
+                'Положить в корзину',
+                callback_data='add_to_cart'
+            ),
             InlineKeyboardButton('Назад', callback_data='back')
         ]
     ]
@@ -66,9 +78,16 @@ def handle_menu(update, context):
     context.bot_data['product_id'] = product_id
     client_id = context.bot_data.get('client_id')
     client_secret = context.bot_data.get('client_secret')
-    selected_product = get_product_by_id(client_id, client_secret, product_id)['data']
+
+    selected_product = get_product_by_id(
+        client_id,
+        client_secret,
+        product_id
+    )['data']
+
     product_price = \
         selected_product['meta']['display_price']['without_tax']['formatted']
+
     product_image_url = get_img_url(client_id, client_secret, product_id)
     chat_id = update.effective_chat.id
 
@@ -133,21 +152,32 @@ def get_cart_contents(client_id, client_secret, cart_id):
                 {product['quantity']} пицц в корзине на сумму {total_price} ₽
             '''
         ))
+
     keyboard = [
-        [InlineKeyboardButton(f"Убрать из корзины '{product['name']}'", callback_data=product["id"])]
+        [
+            InlineKeyboardButton(
+                f"Убрать из корзины '{product['name']}'",
+                callback_data=product["id"]
+            )
+        ]
         for product in cart_products['data']
     ]
     keyboard.append([InlineKeyboardButton('В меню', callback_data='/start')])
     if cart_products:
-        keyboard.append([InlineKeyboardButton('Заказать', callback_data='payment')])
-        cart_display.append(f'К оплате: {get_cart_total(client_id, client_secret, cart_id)[1:]} ₽')
-    message_text = '\n\n'.join(cart_display) if cart_products else 'Корзина пуста'
+        keyboard.append(
+            [InlineKeyboardButton('Заказать', callback_data='payment')]
+        )
+        cart_display.append(
+            f'К оплате: {get_cart_total(client_id, client_secret, cart_id)[1:]} ₽'
+        )
+    text = '\n\n'.join(cart_display) if cart_products else 'Корзина пуста'
     markup = InlineKeyboardMarkup(keyboard)
 
-    return message_text, markup
+    return text, markup
 
 
-def send_order_to_deliveryman(update, context, client_id, client_secret, cart_id, deliveryman_id):
+def send_order_to_deliveryman(update, context, client_id,
+                              client_secret, cart_id, deliveryman_id):
     message_text, _ = get_cart_contents(client_id, client_secret, cart_id)
     context.bot.send_message(
         chat_id=deliveryman_id,
@@ -160,7 +190,9 @@ def send_order_to_deliveryman(update, context, client_id, client_secret, cart_id
 
 
 def send_cart_contents(update, context, client_id, client_secret, cart_id):
-    message_text, reply_markup = get_cart_contents(client_id, client_secret, cart_id)
+    message_text, reply_markup = get_cart_contents(
+        client_id, client_secret, cart_id
+    )
     context.bot.send_message(
         chat_id=cart_id,
         text=message_text,
@@ -183,7 +215,12 @@ def handle_cart(update, context):
         handle_location_waiting(update, context)
         return 'LOCATION_WAITING'
     else:
-        remove_product_from_cart(client_id, client_secret, cart_id, query['data'])
+        remove_product_from_cart(
+            client_id,
+            client_secret,
+            cart_id,
+            query['data']
+        )
         send_cart_contents(update, context, client_id, client_secret, cart_id)
     return 'HANDLE_CART'
 
@@ -205,7 +242,12 @@ def handle_location_waiting(update, context):
         coords = fetch_coordinates(yandex_api_key, update.message.text)
         if not coords:
             update.message.reply_text(
-                text='Не могу распознать адрес. Пожалуйста, проверьте правильность ввода',
+                text=dedent(
+                    '''
+                        Не могу распознать адрес.
+                        Пожалуйста, проверьте правильность ввода
+                    '''
+                ),
                 reply_markup=markup
             )
             return 'LOCATION_WAITING'
@@ -229,7 +271,8 @@ def handle_location_waiting(update, context):
 
 
 def handle_location(update, context):
-    lat, lon = update.message.location['latitude'], update.message.location['longitude']
+    lat = update.message.location['latitude']
+    lon = update.message.location['longitude']
     client_id = context.bot_data['client_id']
     client_secret = context.bot_data['client_secret']
     chat_id = update.effective_chat.id
@@ -254,7 +297,8 @@ def min_distance_calculation(update, context):
         pizzerias_with_distance_to_customer.append(
             {
                 'address': pizzeria['address'],
-                'distance': distance.distance(pizzeria_coords, customer_coords).km,
+                'distance':
+                    distance.distance(pizzeria_coords, customer_coords).km,
             }
         )
     return min(pizzerias_with_distance_to_customer, key=get_distances)
@@ -271,8 +315,8 @@ def send_delivery_terms(update, context):
 
     if distance_to_customer <= .5:
         text = dedent(
-            f''' 
-                Может, заберте пиццу из нашей пиццерии неподалёку? 
+            f'''
+                Может, заберте пиццу из нашей пиццерии неподалёку?
                 Она всего в {distance_to_customer * 1000} метрах от вас!
                 вот её адрес: {nearest_pizzeria['address']}.
                 А можем и бесплатно доставить, нам не сложно
@@ -281,10 +325,11 @@ def send_delivery_terms(update, context):
     elif distance_to_customer <= 5:
         text = dedent(
             f'''
-                Похоже, придётся ехать до вас на самокате. Доставка будет стоить 100 рублей.
+                Похоже, придётся ехать до вас на самокате.
+                Доставка будет стоить 100 рублей.
                 Доставляем или самовывоз?
-                
-                Адрес для самовывоза: 
+
+                Адрес для самовывоза:
                 {nearest_pizzeria['address']}
             '''
         )
@@ -292,8 +337,8 @@ def send_delivery_terms(update, context):
         text = dedent(
             f'''
                 Доставка будет стоить 300 рублей. Доставляем или самовывоз?
-                
-                Адрес для самовывоза: 
+
+                Адрес для самовывоза:
                 {nearest_pizzeria['address']}
             '''
         )
@@ -308,7 +353,11 @@ def send_delivery_terms(update, context):
         del keyboard[0]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    context.bot.send_message(text=text, chat_id=update.message.chat_id, reply_markup=reply_markup)
+    context.bot.send_message(
+        text=text,
+        chat_id=update.message.chat_id,
+        reply_markup=reply_markup
+    )
     context.bot_data['nearest_pizzeria'] = nearest_pizzeria
     return 'HANDLE_SHIPPING_METHOD'
 
@@ -348,9 +397,10 @@ def handle_shipping_method(update, context):
     )
     return start_without_shipping_callback(update, context, chat_id)
 
+
 def write_to_customer(context):
-    text=dedent(
-            f'''
+    text = dedent(
+            '''
                 Приятного аппетита! *место для рекламы*
                 *сообщение что делать если пицца не пришла*
             '''
@@ -371,7 +421,10 @@ def start_without_shipping_callback(update, context, chat_id):
     payload = 'Custom-Payload'
     provider_token = payment_token
     currency = 'RUB'
-    price = float(get_cart_total(client_id, client_secret, cart_id=chat_id)[1:]) * 100
+    cart_total_price = get_cart_total(
+        client_id, client_secret, cart_id=chat_id
+    )
+    price = float(cart_total_price[1:]) * 100
     prices = [LabeledPrice('Test', int(price))]
 
     context.bot.send_invoice(
@@ -399,16 +452,21 @@ def precheckout_callback(update, context):
 
 def handle_users_reply(update, context):
     """
-    Функция, которая запускается при любом сообщении от пользователя и решает как его обработать.
+    Функция, которая запускается при любом сообщении от
+    пользователя и решает как его обработать.
     Эта функция запускается в ответ на эти действия пользователя:
         * Нажатие на inline-кнопку в боте
         * Отправка сообщения боту
         * Отправка команды боту
-    Она получает стейт пользователя из базы данных и запускает соответствующую функцию-обработчик (хэндлер).
-    Функция-обработчик возвращает следующее состояние, которое записывается в базу данных.
-    Если пользователь только начал пользоваться ботом, Telegram форсит его написать "/start",
+    Она получает стейт пользователя из базы данных и запускает
+    соответствующую функцию-обработчик (хэндлер).
+    Функция-обработчик возвращает следующее состояние, которое
+     записывается в базу данных.
+    Если пользователь только начал пользоваться ботом,
+    Telegram форсит его написать "/start",
     поэтому по этой фразе выставляется стартовое состояние.
-    Если пользователь захочет начать общение с ботом заново, он также может воспользоваться этой командой.
+    Если пользователь захочет начать общение с ботом заново, он также
+    может воспользоваться этой командой.
     """
     db_connection = context.bot_data['db_connection']
     if update.message:
@@ -468,8 +526,12 @@ def main():
     dispatcher.bot_data['payment_token'] = payment_token
 
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
-    dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply, pass_job_queue=True))
-    dispatcher.add_handler(MessageHandler(Filters.location, handle_users_reply))
+    dispatcher.add_handler(
+        MessageHandler(Filters.text, handle_users_reply, pass_job_queue=True)
+    )
+    dispatcher.add_handler(
+        MessageHandler(Filters.location, handle_users_reply)
+    )
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
     dispatcher.add_handler(PreCheckoutQueryHandler(precheckout_callback))
 
